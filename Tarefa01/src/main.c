@@ -52,13 +52,15 @@ typedef enum {
     MODO_AUTOMATICO     /* le o LDR */
 } modo_t;
 
-static const char *TAG = "atividade1";
+static const char *TAG = "T1";
 
 static adc_oneshot_unit_handle_t adc1_handle;
 
 /* Função auxiliar equivalente ao map() do Arduino */
 static long map_range(long x, long in_min, long in_max, long out_min, long out_max)
 {
+    ESP_LOGI(TAG, "Chegou aqui5");
+
     if (in_max == in_min) {
         return out_min;
     }
@@ -67,6 +69,8 @@ static long map_range(long x, long in_min, long in_max, long out_min, long out_m
 
 static void gpio_init(void)
 {
+    ESP_LOGI(TAG, "Chegou aqui4");
+
     /* LED2 como saída digital */
     gpio_config_t led2_cfg = {
         .pin_bit_mask = (1ULL << LED2_GPIO),
@@ -90,6 +94,7 @@ static void gpio_init(void)
 
 static void pwm_init(void)
 {
+    ESP_LOGI(TAG, "Chegou aqui3");
     ledc_timer_config_t timer_cfg = {
         .speed_mode       = LEDC_MODE,
         .timer_num        = LEDC_TIMER,
@@ -112,6 +117,8 @@ static void pwm_init(void)
 
 static void adc_init(void)
 {
+    ESP_LOGI(TAG, "Chegou aqui2");
+
     adc_oneshot_unit_init_cfg_t init_cfg = {
         .unit_id = ADC_UNIT_1,
     };
@@ -129,6 +136,7 @@ static void adc_init(void)
 
 void app_main(void)
 {
+    ESP_LOGI(TAG, "Chegou aqui1");
     gpio_init();
     pwm_init();
     adc_init();
