@@ -50,7 +50,9 @@
     [ "pot2:SIG", "esp:32", "green", [ "v57.6", "h95.6", "v-153.6" ] ],
     [ "ldr:SIG", "esp:34", "green", [ "v48", "h134" ] ],
     [ "btn1:2.r", "esp:GND.1", "black", [ "h58.4", "v-47.6" ] ],
-    [ "ldr:VCC", "esp:3V3", "red", [ "v19.2", "h95.2", "v-28.8" ] ]
+    [ "ldr:VCC", "esp:3V3", "red", [ "v19.2", "h95.2", "v-28.8" ] ],
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ]
   ],
   "dependencies": {}
 }
