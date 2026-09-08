@@ -45,14 +45,13 @@
     {
       "type": "wokwi-resistor",
       "id": "r4",
-      "top": 71.15,
-      "left": -230.4,
+      "top": 32.75,
+      "left": -144,
       "attrs": { "value": "22000" }
     }
   ],
   "connections": [
     [ "ldr:GND", "pot2:GND", "black", [ "v28.8", "h-76.8", "v192", "h76.8" ] ],
-    [ "pot2:VCC", "esp:3V3", "red", [ "v38.4", "h56.8", "v-163.2", "h144", "v-28.8" ] ],
     [ "r1:1", "led1:A", "green", [ "v0" ] ],
     [ "led1:C", "esp:GND.1", "black", [ "h-28.4", "v-105.6" ] ],
     [ "r1:2", "esp:16", "green", [ "h66", "v-153.6" ] ],
@@ -64,9 +63,14 @@
     [ "pot2:SIG", "esp:32", "green", [ "v57.6", "h95.6", "v-153.6", "h115.2" ] ],
     [ "ldr:SIG", "esp:34", "green", [ "v28.8", "h182" ] ],
     [ "btn1:2.r", "esp:GND.1", "black", [ "h39.2", "v173.2" ] ],
-    [ "ldr:VCC", "esp:3V3", "red", [ "v9.6", "h181.6", "v-19.2" ] ],
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
-    [ "esp:RX", "$serialMonitor:TX", "", [] ]
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "esp:3V3", "r3:2", "red", [ "h0" ] ],
+    [ "r3:1", "ldr:VCC", "red", [ "v0" ] ],
+    [ "ldr:VCC", "ldr:SIG", "red", [ "v0" ] ],
+    [ "esp:3V3", "r4:2", "red", [ "h0" ] ],
+    [ "r4:1", "pot2:VCC", "red", [ "v0" ] ],
+    [ "pot2:VCC", "pot2:SIG", "red", [ "v0" ] ]
   ],
   "dependencies": {}
 }
