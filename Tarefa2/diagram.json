@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "author": "AKIRA YAMAZAKI",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "wokwi-breadboard-half", "id": "bb1", "top": 112.2, "left": -266, "attrs": {} },
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 105.6, "left": 139.24, "attrs": {} },
+    { "type": "wokwi-hc-sr04", "id": "ultrasonic1", "top": -65.7, "left": -148.1, "attrs": {} },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 90.35,
+      "left": -153.6,
+      "attrs": { "value": "1100" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r2",
+      "top": 90.35,
+      "left": -67.2,
+      "attrs": { "value": "2000" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "esp:GND.1", "bb1:bn.21", "black", [ "h-19.05", "v67.2", "h-126.4" ] ],
+    [ "esp:GND.1", "bb1:bn.22", "black", [ "h-67.05", "v49.3" ] ],
+    [ "esp:5V", "bb1:bp.1", "red", [ "h-76.65", "v259.2", "h-299.2" ] ],
+    [ "ultrasonic1:VCC", "bb1:bp.2", "red", [ "h-182.4", "v268.8" ] ],
+    [ "ultrasonic1:TRIG", "bb1:5b.f", "green", [ "v19.2", "h-134.8" ] ],
+    [ "bb1:5b.g", "esp:32", "green", [ "v28.8", "h249.6", "v-76.8" ] ],
+    [ "ultrasonic1:ECHO", "bb1:8b.f", "orange", [ "v48", "h-116", "v153.6" ] ],
+    [ "r1:1", "bb1:8b.f", "green", [ "v0" ] ],
+    [ "r1:2", "bb1:17b.g", "green", [ "v0" ] ],
+    [ "bb1:17b.h", "esp:33", "orange", [ "v9.6", "h38.4", "v-57.6" ] ],
+    [ "r2:2", "bb1:bn.23", "black", [ "h18", "v212.5" ] ],
+    [ "ultrasonic1:GND", "bb1:bn.24", "black", [ "h56.4", "v249.6", "v30.1" ] ],
+    [ "r2:1", "bb1:17b.f", "green", [ "h-19.2", "v134.4" ] ]
+  ],
+  "dependencies": {}
+}
