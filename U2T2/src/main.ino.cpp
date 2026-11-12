@@ -8,16 +8,17 @@
  *   3) recebe do Node-RED o estado de cada alerta e acende/apaga o LED.
  * A LÓGICA DOS ALERTAS (presença, T < 20 °C, T > 25 °C, UR > 50 %) FICA NO NODE-RED.
  *
- * Bibliotecas (Arduino IDE > Gerenciador de Bibliotecas):
+ * Biblioteca necessária (Arduino IDE > Gerenciador de Bibliotecas):
  *   - PubSubClient (Nick O'Leary)
- *   - DHT sensor library (Adafruit) + Adafruit Unified Sensor
+ * A comunicação com o DHT11 foi implementada aqui mesmo, a partir do
+ * datasheet (sem a biblioteca da Adafruit) – ver a seção "DRIVER DO DHT".
  *
  * ---------------------------------------------------------------------------
  * LIGAÇÕES (iguais ao diagram.json – protoboard de 30 colunas)
  *   Trilhos:  + superior = 3V3   | - superior = GND
  *             + inferior = VIN(5V) | - inferior = GND
  *   DHT11  : VCC col3, DATA col4, NC col5, GND col6 (linha a)
- *            10k entre col4 e trilho 3V3 (pull-up) | DATA -> GPIO 4
+ *            5k entre col4 e trilho 3V3 (pull-up) | DATA -> GPIO 4
  *   HC-SR501: VCC col11 (-> 5V), OUT col12 (-> GPIO 27), GND col13
  *   LEDs (anodo na coluna N, catodo na N+1, 220R do catodo ao GND):
  *     Presença     (amarelo)  col 16/17 -> GPIO 25
@@ -30,7 +31,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
-#include <DHT.h>
 
 // ======================= SIMULAÇÃO x CIRCUITO REAL ==========================
 // 1 = Wokwi (o Wokwi só tem o DHT22 e usa a rede "Wokwi-GUEST")
@@ -41,15 +41,15 @@
 #if SIMULACAO_WOKWI
 const char* ssid     = "Wokwi-GUEST";       // Nome do roteador Wi-Fi
 const char* password = "";                  // Senha do roteador Wi-Fi
-#define DHT_TIPO DHT22
+#define DHT_MODELO 22                       // Wokwi: DHT22
 #else
 const char* ssid     = "NOME_ROTEADOR";     // Nome do roteador Wi-Fi
 const char* password = "SENHA_ROTEADOR";    // Senha do roteador Wi-Fi
-#define DHT_TIPO DHT11
+#define DHT_MODELO 11                       // Circuito real: DHT11
 #endif
 
-// Broker MQTT (Mosquitto online para testes; troque pelos dados do professor)
-const char* mqtt_server = "broker.emqx.io";  // END_IP_BROKER
+// Broker MQTT (troque pelos dados do professor quando for o caso)
+const char* mqtt_server = "broker.emqx.io";      // END_IP_BROKER
 const int   mqtt_port   = 1883;                  // PORTA_BROKER
 const char* un          = "";                    // USUARIO_BROKER (vazio = sem autenticação)
 const char* pw          = "";                    // SENHA_BROKER
@@ -82,14 +82,127 @@ float umidade     = NAN;
 int   presenca    = LOW;
 int   presencaPublicada = -1;            // força a 1ª publicação
 
-const unsigned long INTERVALO_DHT = 2000;    // DHT11: no máx. 1 leitura/s
-unsigned long ultimaLeituraDHT = 0;
+const unsigned long INTERVALO_DHT = 2000;    // datasheet: no máx. 1 leitura/s
+unsigned long ultimaLeituraDHT = 0;          // 1ª leitura só após 2 s (datasheet: esperar 1 s)
 unsigned long inicioTentativa  = 0;          // para reconectar a cada 5 s
 bool mqttConectado = false;
 
 WiFiClient espClient;                // Cria o cliente WiFi
 PubSubClient client(espClient);      // Cliente MQTT usando o cliente WiFi
-DHT dht(PINO_DHT, DHT_TIPO);
+
+// ============================================================================
+//                     DRIVER DO DHT (implementação própria)
+// ============================================================================
+// Protocolo de 1 fio, segundo o datasheet:
+//
+//  ESP32: puxa a linha p/ 0 por >= 18 ms (sinal de início) e solta.
+//         O pull-up leva a linha a 3,3 V.
+//  DHT  : após 20-40 us responde: 0 por 80 us e 1 por 80 us.
+//  DHT  : envia 40 bits. Cada bit = 50 us em 0 + tempo em 1:
+//            ~26-28 us em 1  -> bit 0
+//            ~70 us em 1     -> bit 1
+//  Dados: [UR inteira][UR decimal][T inteira][T decimal][checksum]
+//         checksum = soma dos 4 primeiros bytes (só os 8 bits menores).
+//
+//  O DHT22 (usado no Wokwi) tem o mesmo protocolo, mas o início pode ser
+//  de 1-10 ms e os dados vêm em 16 bits x 10 (ex.: 0x00F5 = 24,5).
+// ============================================================================
+
+enum DhtStatus { DHT_OK, DHT_ERRO_SEM_RESPOSTA, DHT_ERRO_TIMEOUT, DHT_ERRO_CHECKSUM };
+
+#if DHT_MODELO == 11
+const uint32_t DHT_INICIO_MS = 20;   // datasheet DHT11: pelo menos 18 ms
+#else
+const uint32_t DHT_INICIO_MS = 2;    // DHT22: 1 a 10 ms
+#endif
+const uint32_t DHT_TIMEOUT_US = 200; // nenhuma fase do protocolo passa de ~80 us
+
+// Seção crítica: durante os ~5 ms de recepção, as interrupções (Wi-Fi etc.)
+// ficam desligadas para não atrapalhar a medição dos tempos em microssegundos.
+static portMUX_TYPE dhtMux = portMUX_INITIALIZER_UNLOCKED;
+
+// Espera enquanto a linha estiver em 'nivel'. Retorna quanto tempo (us)
+// ela ficou nesse nível, ou UINT32_MAX se passar do timeout.
+static uint32_t dhtTempoNoNivel(uint8_t nivel) {
+  uint32_t inicio = micros();
+  while (digitalRead(PINO_DHT) == nivel) {
+    if (micros() - inicio > DHT_TIMEOUT_US) return UINT32_MAX;
+  }
+  return micros() - inicio;
+}
+
+// Lê os 5 bytes brutos do sensor.
+static DhtStatus dhtLerBytes(uint8_t dados[5]) {
+  for (int i = 0; i < 5; i++) dados[i] = 0;
+
+  // 1) Sinal de início: ESP32 puxa a linha para 0 (fecha a "chave")
+  pinMode(PINO_DHT, OUTPUT);
+  digitalWrite(PINO_DHT, LOW);
+  delay(DHT_INICIO_MS);
+
+  // 2) Solta a linha: vira entrada e o pull-up de 5k a leva para 3,3 V
+  //    (pinMode fica fora da seção crítica: no core novo do ESP32 ele usa travas)
+  pinMode(PINO_DHT, INPUT);
+
+  DhtStatus status = DHT_OK;
+  portENTER_CRITICAL(&dhtMux);
+
+  // 3) Resposta do sensor: 1 (20-40 us, pull-up) -> 0 (80 us) -> 1 (80 us)
+  //    Se o sensor já tiver puxado para 0, a 1ª espera só retorna na hora.
+  if (dhtTempoNoNivel(HIGH) == UINT32_MAX ||
+      dhtTempoNoNivel(LOW)  == UINT32_MAX ||
+      dhtTempoNoNivel(HIGH) == UINT32_MAX) {
+    status = DHT_ERRO_SEM_RESPOSTA;
+  } else {
+    // 4) 40 bits: compara o tempo em 1 com o tempo em 0 (50 us).
+    //    Em 1 por mais tempo que em 0 -> bit 1; por menos -> bit 0.
+    for (int i = 0; i < 40; i++) {
+      uint32_t tBaixo = dhtTempoNoNivel(LOW);
+      uint32_t tAlto  = dhtTempoNoNivel(HIGH);
+      if (tBaixo == UINT32_MAX || tAlto == UINT32_MAX) {
+        status = DHT_ERRO_TIMEOUT;
+        break;
+      }
+      dados[i / 8] <<= 1;            // abre espaço para o próximo bit (MSB primeiro)
+      if (tAlto > tBaixo) dados[i / 8] |= 1;
+    }
+  }
+
+  portEXIT_CRITICAL(&dhtMux);
+  if (status != DHT_OK) return status;
+
+  // 5) Checksum
+  uint8_t soma = dados[0] + dados[1] + dados[2] + dados[3];   // estoura em 8 bits de propósito
+  if (soma != dados[4]) return DHT_ERRO_CHECKSUM;
+  return DHT_OK;
+}
+
+// Converte os bytes em temperatura (°C) e umidade (%).
+DhtStatus dhtLer(float &t, float &h) {
+  uint8_t d[5];
+  DhtStatus status = dhtLerBytes(d);
+  if (status != DHT_OK) return status;
+
+#if DHT_MODELO == 11
+  h = d[0] + d[1] * 0.1f;
+  t = d[2] + (d[3] & 0x7F) * 0.1f;
+  if (d[3] & 0x80) t = -t;           // bit de sinal (versões novas do DHT11)
+#else
+  h = ((d[0] << 8) | d[1]) * 0.1f;
+  t = (((d[2] & 0x7F) << 8) | d[3]) * 0.1f;
+  if (d[2] & 0x80) t = -t;           // bit mais alto = temperatura negativa
+#endif
+  return DHT_OK;
+}
+
+const char* dhtErroTexto(DhtStatus s) {
+  switch (s) {
+    case DHT_ERRO_SEM_RESPOSTA: return "sensor nao respondeu (ligacao/pull-up?)";
+    case DHT_ERRO_TIMEOUT:      return "timeout no meio dos bits";
+    case DHT_ERRO_CHECKSUM:     return "checksum invalido";
+    default:                    return "ok";
+  }
+}
 
 // ====================== CALLBACK: mensagens recebidas =======================
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -156,10 +269,11 @@ void leSensores() {
   // DHT: a cada INTERVALO_DHT
   if (millis() - ultimaLeituraDHT >= INTERVALO_DHT) {
     ultimaLeituraDHT = millis();
-    float t = dht.readTemperature();
-    float h = dht.readHumidity();
-    if (isnan(t) || isnan(h)) {
-      Serial.println("Falha na leitura do DHT!");
+    float t, h;
+    DhtStatus s = dhtLer(t, h);
+    if (s != DHT_OK) {
+      Serial.print("Falha na leitura do DHT: ");
+      Serial.println(dhtErroTexto(s));
       return;
     }
     temperatura = t;
@@ -191,6 +305,7 @@ void publicaPresenca() {
 void setup() {
   Serial.begin(115200);
 
+  pinMode(PINO_DHT, INPUT);          // linha livre: o pull-up a mantém em 3,3 V
   pinMode(PINO_PIR, INPUT);
   pinMode(LED_PRESENCA, OUTPUT);
   pinMode(LED_TEMP_ALTA, OUTPUT);
@@ -201,7 +316,6 @@ void setup() {
   digitalWrite(LED_TEMP_BAIXA, LOW);
   digitalWrite(LED_UMIDADE, LOW);
 
-  dht.begin();
   conectaWiFi();
 
   client.setServer(mqtt_server, mqtt_port);
