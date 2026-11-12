@@ -1,0 +1,3 @@
+mqttx sub -h broker.emqx.io -p 1883 -t "/ESP32_U2T2_AKIRA/#" -v
+
+mqttx pub -h broker.emqx.io -p 1883 -t "/ESP32_U2T2_AKIRA/LED/presenca" -m "0"
