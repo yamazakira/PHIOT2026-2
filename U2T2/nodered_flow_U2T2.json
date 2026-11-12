@@ -1,0 +1,417 @@
+[
+    {
+        "id": "flow_u2t2",
+        "type": "tab",
+        "label": "HIoT 15 - U2T2",
+        "disabled": false,
+        "info": "ESP32 + DHT + PIR via MQTT. Lógica dos alertas implementada aqui."
+    },
+    {
+        "id": "in_temp",
+        "type": "mqtt in",
+        "z": "flow_u2t2",
+        "name": "",
+        "topic": "/ESP32_U2T2_AKIRA/temperatura",
+        "qos": "0",
+        "datatype": "utf8",
+        "broker": "broker_emqx",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 80,
+        "wires": [
+            [
+                "f_temp"
+            ]
+        ]
+    },
+    {
+        "id": "in_umid",
+        "type": "mqtt in",
+        "z": "flow_u2t2",
+        "name": "",
+        "topic": "/ESP32_U2T2_AKIRA/umidade",
+        "qos": "0",
+        "datatype": "utf8",
+        "broker": "broker_emqx",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 200,
+        "wires": [
+            [
+                "f_umid"
+            ]
+        ]
+    },
+    {
+        "id": "in_pres",
+        "type": "mqtt in",
+        "z": "flow_u2t2",
+        "name": "",
+        "topic": "/ESP32_U2T2_AKIRA/presenca",
+        "qos": "0",
+        "datatype": "utf8",
+        "broker": "broker_emqx",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 320,
+        "wires": [
+            [
+                "f_pres"
+            ]
+        ]
+    },
+    {
+        "id": "f_temp",
+        "type": "function",
+        "z": "flow_u2t2",
+        "name": "Alertas temperatura",
+        "func": "// Lógica dos alertas de temperatura (fica no Node-RED, não no ESP32)\nconst BASE = \"/ESP32_U2T2_AKIRA\";\nconst t = Number(msg.payload);\nif (isNaN(t)) return null;\n\nconst alta  = t > 25 ? 1 : 0;   // acima de 25 °C\nconst baixa = t < 20 ? 1 : 0;   // abaixo de 20 °C\n\n// estado de todos os alertas (compartilhado com os outros nós)\nconst a = flow.get('alertas') || {presenca:0, temp_alta:0, temp_baixa:0, umidade:0};\nlet aviso = null;\nif (alta && !a.temp_alta)   aviso = { topic: \"Temperatura ALTA\",  payload: `Alerta: temperatura alta, ${t.toFixed(1)} graus` };\nif (baixa && !a.temp_baixa) aviso = { topic: \"Temperatura BAIXA\", payload: `Alerta: temperatura baixa, ${t.toFixed(1)} graus` };\na.temp_alta = alta; a.temp_baixa = baixa;\nflow.set('alertas', a);\n\nreturn [\n    { topic: \"Temperatura (°C)\", payload: t },                       // 1: gauge/gráfico\n    [ { topic: BASE + \"/LED/temp_alta\",  payload: String(alta)  },     // 2: LEDs no ESP32\n      { topic: BASE + \"/LED/temp_baixa\", payload: String(baixa) } ],\n    { payload: Object.assign({}, a) },                                // 3: painel de alertas\n    aviso                                                               // 4: notificação/voz (só quando o alarme dispara)\n];",
+        "outputs": 4,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 80,
+        "wires": [
+            [
+                "g_temp",
+                "chart"
+            ],
+            [
+                "mq_out"
+            ],
+            [
+                "painel"
+            ],
+            [
+                "toast",
+                "audio"
+            ]
+        ]
+    },
+    {
+        "id": "f_umid",
+        "type": "function",
+        "z": "flow_u2t2",
+        "name": "Alerta umidade",
+        "func": "// Lógica do alerta de umidade\nconst BASE = \"/ESP32_U2T2_AKIRA\";\nconst h = Number(msg.payload);\nif (isNaN(h)) return null;\n\nconst alto = h > 50 ? 1 : 0;    // acima de 50 %\n\nconst a = flow.get('alertas') || {presenca:0, temp_alta:0, temp_baixa:0, umidade:0};\nlet aviso = null;\nif (alto && !a.umidade) aviso = { topic: \"Umidade ALTA\", payload: `Alerta: umidade alta, ${h.toFixed(0)} por cento` };\na.umidade = alto;\nflow.set('alertas', a);\n\nreturn [\n    { topic: \"Umidade (%)\", payload: h },\n    { topic: BASE + \"/LED/umidade\", payload: String(alto) },\n    { payload: Object.assign({}, a) },\n    aviso\n];",
+        "outputs": 4,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 200,
+        "wires": [
+            [
+                "g_umid",
+                "chart"
+            ],
+            [
+                "mq_out"
+            ],
+            [
+                "painel"
+            ],
+            [
+                "toast",
+                "audio"
+            ]
+        ]
+    },
+    {
+        "id": "f_pres",
+        "type": "function",
+        "z": "flow_u2t2",
+        "name": "Alarme presença",
+        "func": "// Lógica do alarme de presença\nconst BASE = \"/ESP32_U2T2_AKIRA\";\nconst p = String(msg.payload).trim() === \"1\" ? 1 : 0;\n\nconst a = flow.get('alertas') || {presenca:0, temp_alta:0, temp_baixa:0, umidade:0};\nlet aviso = null;\nif (p && !a.presenca) aviso = { topic: \"PRESENÇA detectada\", payload: \"Alerta: presença detectada\" };\na.presenca = p;\nflow.set('alertas', a);\n\nreturn [\n    { payload: p ? \"DETECTADA\" : \"Nenhuma\" },\n    { topic: BASE + \"/LED/presenca\", payload: String(p) },\n    { payload: Object.assign({}, a) },\n    aviso\n];",
+        "outputs": 4,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 320,
+        "wires": [
+            [
+                "t_pres"
+            ],
+            [
+                "mq_out"
+            ],
+            [
+                "painel"
+            ],
+            [
+                "toast",
+                "audio"
+            ]
+        ]
+    },
+    {
+        "id": "mq_out",
+        "type": "mqtt out",
+        "z": "flow_u2t2",
+        "name": "LEDs no ESP32",
+        "topic": "",
+        "qos": "0",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "broker_emqx",
+        "x": 710,
+        "y": 240,
+        "wires": []
+    },
+    {
+        "id": "chart",
+        "type": "ui_chart",
+        "z": "flow_u2t2",
+        "name": "",
+        "group": "g_chart",
+        "order": 1,
+        "width": 12,
+        "height": 5,
+        "label": "Temperatura e umidade",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Aguardando dados...",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": "10",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#f44336",
+            "#2196f3",
+            "#ff7f0e",
+            "#2ca02c",
+            "#98df8a",
+            "#d62728",
+            "#ff9896",
+            "#9467bd",
+            "#c5b0d5"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 700,
+        "y": 120,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "audio",
+        "type": "ui_audio",
+        "z": "flow_u2t2",
+        "name": "Alerta sonoro (voz)",
+        "group": "g_alert",
+        "voice": "",
+        "always": true,
+        "x": 710,
+        "y": 460,
+        "wires": []
+    },
+    {
+        "id": "toast",
+        "type": "ui_toast",
+        "z": "flow_u2t2",
+        "position": "top right",
+        "displayTime": "6",
+        "highlight": "red",
+        "sendall": true,
+        "outputs": 0,
+        "ok": "OK",
+        "cancel": "",
+        "raw": false,
+        "className": "",
+        "topic": "",
+        "name": "Notificação",
+        "x": 690,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "painel",
+        "type": "ui_template",
+        "z": "flow_u2t2",
+        "group": "g_alert",
+        "name": "Painel de alertas",
+        "order": 1,
+        "width": 6,
+        "height": 4,
+        "format": "<style>\n  .al-row{display:flex;align-items:center;justify-content:space-between;padding:8px 4px;border-bottom:1px solid rgba(128,128,128,.25)}\n  .al-dot{height:18px;border-radius:50%;margin-right:10px;flex:none;background:#666}\n  .al-on .al-dot{animation:al-pisca .8s infinite alternate}\n  @keyframes al-pisca{from{opacity:1}to{opacity:.25}}\n</style>\n<div ng-repeat=\"it in itens\" class=\"al-row\" ng-class=\"{'al-on': estado[it.k]==1}\">\n  <div style=\"display:flex;align-items:center\">\n    <span class=\"al-dot\" ng-style=\"{'background': estado[it.k]==1 ? it.cor : '#666'}\"></span>{{it.nome}}\n  </div>\n  <b ng-style=\"{'color': estado[it.k]==1 ? it.cor : 'inherit'}\">{{estado[it.k]==1 ? 'ALERTA' : 'Normal'}}</b>\n</div>\n<script>\n(function(scope){\n  scope.itens = [\n    {k:'presenca',   nome:'Presença detectada',         cor:'#ffc107'},\n    {k:'temp_alta',  nome:'Temperatura alta (> 25 °C)',  cor:'#f44336'},\n    {k:'temp_baixa', nome:'Temperatura baixa (< 20 °C)', cor:'#2196f3'},\n    {k:'umidade',    nome:'Umidade alta (> 50 %)',       cor:'#4caf50'}\n  ];\n  scope.estado = {};\n  scope.$watch('msg', function(m){ if (m && m.payload) scope.estado = m.payload; });\n})(scope);\n</script>",
+        "storeOutMessages": true,
+        "fwdInMessages": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 700,
+        "y": 360,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "t_pres",
+        "type": "ui_text",
+        "z": "flow_u2t2",
+        "group": "g_sens",
+        "order": 3,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Presença",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "style": false,
+        "font": "",
+        "fontSize": "",
+        "color": "#000000",
+        "x": 680,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "g_temp",
+        "type": "ui_gauge",
+        "z": "flow_u2t2",
+        "name": "",
+        "group": "g_sens",
+        "order": 1,
+        "width": 3,
+        "height": 3,
+        "gtype": "gage",
+        "title": "Temperatura",
+        "label": "°C",
+        "format": "{{value}}",
+        "min": 0,
+        "max": 50,
+        "colors": [
+            "#2196f3",
+            "#4caf50",
+            "#f44336"
+        ],
+        "seg1": "20",
+        "seg2": "25",
+        "className": "",
+        "x": 690,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "g_umid",
+        "type": "ui_gauge",
+        "z": "flow_u2t2",
+        "name": "",
+        "group": "g_sens",
+        "order": 2,
+        "width": 3,
+        "height": 3,
+        "gtype": "gage",
+        "title": "Umidade",
+        "label": "%",
+        "format": "{{value}}",
+        "min": 0,
+        "max": 100,
+        "colors": [
+            "#4caf50",
+            "#4caf50",
+            "#f44336"
+        ],
+        "seg1": "50",
+        "seg2": "50",
+        "className": "",
+        "x": 680,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "broker_emqx",
+        "type": "mqtt-broker",
+        "name": "EMQX público",
+        "broker": "broker.emqx.io",
+        "port": "1883",
+        "clientid": "nodered_u2t2_akira",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "closeTopic": "",
+        "willTopic": ""
+    },
+    {
+        "id": "g_chart",
+        "type": "ui_group",
+        "name": "Histórico",
+        "tab": "tab_u2t2",
+        "order": 3,
+        "disp": true,
+        "width": "12",
+        "collapse": false
+    },
+    {
+        "id": "g_alert",
+        "type": "ui_group",
+        "name": "Alertas",
+        "tab": "tab_u2t2",
+        "order": 2,
+        "disp": true,
+        "width": "6",
+        "collapse": false
+    },
+    {
+        "id": "g_sens",
+        "type": "ui_group",
+        "name": "Sensores",
+        "tab": "tab_u2t2",
+        "order": 1,
+        "disp": true,
+        "width": "6",
+        "collapse": false
+    },
+    {
+        "id": "tab_u2t2",
+        "type": "ui_tab",
+        "name": "Monitoramento U2T2",
+        "icon": "dashboard",
+        "order": 1,
+        "disabled": false,
+        "hidden": false
+    },
+    {
+        "id": "0453dacfb85f7035",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-dashboard": "3.6.6"
+        }
+    }
+]
