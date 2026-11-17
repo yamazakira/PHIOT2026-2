@@ -2,17 +2,17 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-// Modo de execução: 1 para simulação no Wokwi, 0 para o circuito real
+// 1 para simulação no Wokwi, 0 para o circuito real
 #define SIMULACAO_WOKWI 1
 
-// Credenciais Wi-Fi e modelo do sensor conforme o modo de execução
+// wifi
 #if SIMULACAO_WOKWI
 const char* ssid     = "Wokwi-GUEST";
 const char* password = "";
 #define DHT_MODELO 22
 #else
-const char* ssid     = "NOME_ROTEADOR";
-const char* password = "SENHA_ROTEADOR";
+const char* ssid     = "NPITI-IoT";
+const char* password = "NPITI-IoT";
 #define DHT_MODELO 11
 #endif
 
@@ -23,7 +23,7 @@ const char* un          = "";
 const char* pw          = "";
 const char* id          = "ESP32_U2T2_AKIRA";
 
-// Tópicos MQTT de publicação (sensores) e assinatura (LEDs)
+// Tópicos
 #define BASE "/ESP32_U2T2_AKIRA"
 const char* TOP_TEMP     = BASE "/temperatura";
 const char* TOP_UMID     = BASE "/umidade";
@@ -34,7 +34,7 @@ const char* TOP_LED_TEMP_ALTA  = BASE "/LED/temp_alta";
 const char* TOP_LED_TEMP_BAIXA = BASE "/LED/temp_baixa";
 const char* TOP_LED_UMIDADE    = BASE "/LED/umidade";
 
-// Pinos
+// pinos
 const uint8_t PINO_DHT = 4;
 const uint8_t PINO_PIR = 27;
 const uint8_t LED_PRESENCA   = 25;
@@ -42,7 +42,7 @@ const uint8_t LED_TEMP_ALTA  = 26;
 const uint8_t LED_TEMP_BAIXA = 33;
 const uint8_t LED_UMIDADE    = 32;
 
-// Variáveis temporárias dos sensores e controle de tempo
+// variáveis temporárias dos sensores e controle de tempo
 float temperatura = NAN;
 float umidade     = NAN;
 int   presenca    = LOW;
@@ -53,11 +53,11 @@ unsigned long ultimaLeituraDHT = 0;
 unsigned long inicioTentativa  = 0;
 bool mqttConectado = false;
 
-// Clientes Wi-Fi e MQTT
+// clientes
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-// Constantes e tipos do driver do DHT
+// constantes e tipos do driver do DHT
 enum DhtStatus { DHT_OK, DHT_ERRO_SEM_RESPOSTA, DHT_ERRO_TIMEOUT, DHT_ERRO_CHECKSUM };
 
 #if DHT_MODELO == 11
@@ -69,7 +69,7 @@ const uint32_t DHT_TIMEOUT_US = 200;
 
 static portMUX_TYPE dhtMux = portMUX_INITIALIZER_UNLOCKED;
 
-// Mede por quanto tempo (us) a linha do DHT permanece no nível informado, com timeout
+// mede por quanto tempo (us) a linha do DHT permanece no nível informado, com timeout
 static uint32_t dhtTempoNoNivel(uint8_t nivel) {
   uint32_t inicio = micros();
   while (digitalRead(PINO_DHT) == nivel) {
@@ -78,7 +78,7 @@ static uint32_t dhtTempoNoNivel(uint8_t nivel) {
   return micros() - inicio;
 }
 
-// Envia o sinal de início, recebe os 40 bits do DHT e valida o checksum
+// envia o sinal de início, recebe os 40 bits do DHT e valida o checksum
 static DhtStatus dhtLerBytes(uint8_t dados[5]) {
   for (int i = 0; i < 5; i++) dados[i] = 0;
 
@@ -115,7 +115,7 @@ static DhtStatus dhtLerBytes(uint8_t dados[5]) {
   return DHT_OK;
 }
 
-// Converte os bytes recebidos em temperatura (°C) e umidade (%)
+// converte os bytes recebidos em temperatura (°C) e umidade (%)
 DhtStatus dhtLer(float &t, float &h) {
   uint8_t d[5];
   DhtStatus status = dhtLerBytes(d);
@@ -133,7 +133,7 @@ DhtStatus dhtLer(float &t, float &h) {
   return DHT_OK;
 }
 
-// Retorna a descrição do erro de leitura do DHT
+// retorna a descrição do erro de leitura do DHT
 const char* dhtErroTexto(DhtStatus s) {
   switch (s) {
     case DHT_ERRO_SEM_RESPOSTA: return "sensor nao respondeu (ligacao/pull-up?)";
@@ -143,7 +143,7 @@ const char* dhtErroTexto(DhtStatus s) {
   }
 }
 
-// Recebe as mensagens MQTT e acende ou apaga o LED do tópico correspondente
+// recebe as mensagens MQTT e acende ou apaga o LED do tópico correspondente
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Mensagem recebida [");
   Serial.print(topic);
@@ -162,22 +162,78 @@ void callback(char* topic, byte* payload, unsigned int length) {
   else if (strcmp(topic, TOP_LED_UMIDADE)    == 0) digitalWrite(LED_UMIDADE,    state);
 }
 
-// Conecta ao Wi-Fi e aguarda até a conexão ser estabelecida
+// converte o código de WiFi.status() em texto
+const char* wifiStatusTexto(wl_status_t s) {
+  switch (s) {
+    case WL_IDLE_STATUS:     return "ocioso, iniciando";
+    case WL_NO_SSID_AVAIL:   return "rede nao encontrada";
+    case WL_SCAN_COMPLETED:  return "busca de redes concluida";
+    case WL_CONNECTED:       return "conectado";
+    case WL_CONNECT_FAILED:  return "falha na conexao";
+    case WL_CONNECTION_LOST: return "conexao perdida";
+    case WL_DISCONNECTED:    return "desconectado, tentando conectar";
+    default:                 return "desconhecido";
+  }
+}
+
+// converte o código de motivo da desconexão do ESP32 em texto
+const char* wifiMotivoTexto(uint8_t motivo) {
+  switch (motivo) {
+    case 2:   return "autenticacao expirou (senha errada?)";
+    case 8:   return "desconexao solicitada";
+    case 15:  return "senha incorreta (handshake 4-way expirou)";
+    case 201: return "rede nao encontrada (nome errado, fora de alcance ou rede so 5 GHz)";
+    case 202: return "falha de autenticacao (senha incorreta)";
+    case 203: return "falha de associacao com o roteador";
+    case 204: return "senha incorreta (handshake expirou)";
+    case 210:
+    case 211:
+    case 212: return "rede encontrada, mas incompativel ou sinal fraco";
+    default:  return "outro motivo (ver lista wifi_err_reason_t do ESP-IDF)";
+  }
+}
+
+// mostra o motivo informado pelo ESP32 sempre que a conexão Wi-Fi cai ou falha
+void eventoWiFi(WiFiEvent_t evento, WiFiEventInfo_t info) {
+  if (evento == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    uint8_t motivo = info.wifi_sta_disconnected.reason;
+    Serial.printf("\nWi-Fi desconectado, motivo %u: %s\n", motivo, wifiMotivoTexto(motivo));
+  }
+}
+
+// conecta ao Wi-Fi mostrando cada mudança de status e reinicia a tentativa após 20 s
 void conectaWiFi() {
-  Serial.print("Conectando ao Wi-Fi ");
-  Serial.print(ssid);
+  Serial.printf("Conectando ao Wi-Fi %s\n", ssid);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
+
+  wl_status_t anterior = WL_NO_SHIELD;
+  unsigned long inicio = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    wl_status_t atual = WiFi.status();
+    if (atual != anterior) {
+      Serial.printf("\n[%lu s] status %d: %s ", (millis() - inicio) / 1000, atual, wifiStatusTexto(atual));
+      anterior = atual;
+    }
     Serial.print(".");
+
+    if (millis() - inicio > 20000) {
+      Serial.println("\nSem conexao apos 20 s, reiniciando a tentativa");
+      WiFi.disconnect();
+      delay(1000);
+      WiFi.begin(ssid, password);
+      inicio = millis();
+      anterior = WL_NO_SHIELD;
+    }
+    delay(500);
   }
   Serial.println();
   Serial.print("Wi-Fi conectado. IP: ");
-  Serial.println(WiFi.localIP());
+  Serial.print(WiFi.localIP());
+  Serial.printf(" | sinal (RSSI): %d dBm\n", WiFi.RSSI());
 }
 
-// Conecta ao broker MQTT e assina os tópicos dos LEDs, tentando de novo a cada 5 s
+// conecta ao broker MQTT e assina os tópicos dos LEDs, tentando de novo a cada 5 s
 void conectaMQTT() {
   if (client.connected()) return;
   if (inicioTentativa != 0 && millis() - inicioTentativa < 5000) return;
@@ -200,7 +256,7 @@ void conectaMQTT() {
   }
 }
 
-// Lê o PIR continuamente e o DHT a cada 2 s, publicando temperatura e umidade
+// lê o PIR continuamente e o DHT a cada 2 s, publicando temperatura e umidade
 void leSensores() {
   presenca = digitalRead(PINO_PIR);
 
@@ -253,6 +309,7 @@ void setup() {
   digitalWrite(LED_TEMP_BAIXA, LOW);
   digitalWrite(LED_UMIDADE, LOW);
 
+  WiFi.onEvent(eventoWiFi);
   conectaWiFi();
 
   client.setServer(mqtt_server, mqtt_port);
